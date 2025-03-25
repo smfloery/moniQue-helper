@@ -1,4 +1,4 @@
-Additional scripts extending the functionality of the moniQue QGIS plugin. Why this separate repository? While developing a QGIS plugin has several benefits, it comes with one certain limitation: One is limited / constrained to the provided QGIS Python version. Especially if one required libraries which have additional dependencies (C++ etc.) it gets quite tricky. Therefore we decieded to move some functionalities from the core plugin to this auxiliary repository.
+Additional scripts extending the functionality of the moniQue QGIS plugin. Why this separate repository? While developing a QGIS plugin has several benefits, it comes with one certain limitation: One is limited / constrained to the provided QGIS Python version. Especially for some libraries with additional dependencies (C++ etc.) it gets quite tricky. Therefore we decided to move some functionalities from the core plugin to this auxiliary repository.
 
 ## Installation
 On Windows, installing via Conda is strongly recommended:
