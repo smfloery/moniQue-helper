@@ -30,7 +30,7 @@ python PATH/TO/main.py create-mesh DTM_PATH OUT_DIR OUT_NAME MAX_ERROR --tile-si
 
 ``DTM_PATH`` is the path to the raster file representing your DTM: Any GDAL suuported raster format is provided. ``OUT_DIR`` is the output directory. Within this directory a ``OUT_NAME``.json will be created which is required by moniQue. Furthermore, a subfolder ``mesh`` will be created where the individual tiles are stored in the .ply format.  The last argument ``MAX_ERROR`` is used to defined the simplification of the mesh. This is the maximum deviation in meters of the final mesh from the original DTM. Accordingly, high values will lead to much more decimeted meshes. Per default, a tile size of 1000px will be used. This can be manually adjusted with the ``--tile-size`` option. Furthermore, the input DTM can be clipped to a subregion before the tiles are created. For that the extent must be specifified as ``--extent minx miny maxx maxy``. If no extent is provided, the whole DTM will be used.
 
-We tested moniQue with a DTM of 1m x 1m resolution up to extents of 25km x 25km with a tilesize of 1000px x 1000px. Even with an orthophoto of 1m x 1m as texture a solid performance on a regular desktop PC could be achieved.
+We tested moniQue with a DTM of 1m x 1m resolution up to extents of 25km x 25km with a tilesize of 1000px x 1000px. Above 15km performance slowly decreases, especially with an orthophoto of 1m x 1m as texture.
 
 ### Create orthophoto tiles (add-ortho)
 In many cases you want to add an orthophoto as texture onto the mesh. Accordingly, its necessary to split the available orthophoto into the same tiles as the mesh. This can be done with the add-ortho tool:
