@@ -220,7 +220,7 @@ class MeshGrid:
         
     def build(self):
         print("...loading %s." % (self.path))
-        dgm_arr, dgm_gt, dgm_prj, dgm_h, dgm_w, dgm_nd = load_geoimg(self.path, nr_bands=1, band_dtype=np.float32)        
+        dgm_arr, dgm_gt, dgm_prj_raw, dgm_h, dgm_w, dgm_nd = load_geoimg(self.path, nr_bands=1, band_dtype=np.float32)        
         dgm_arr[dgm_arr == dgm_nd] = -1
         
         if self.extent[0] is not None:
@@ -234,7 +234,7 @@ class MeshGrid:
             dgm_gt = (self.extent[0], dgm_gt[1], dgm_gt[2], self.extent[3], dgm_gt[4], dgm_gt[5])
             dgm_h, dgm_w = np.shape(dgm_arr)
         
-        dgm_prj = osr.SpatialReference(wkt=dgm_prj)
+        dgm_prj = osr.SpatialReference(wkt=dgm_prj_raw)
         dgm_prj.AutoIdentifyEPSG()
         dgm_epsg = dgm_prj.GetAttrValue('AUTHORITY',1)
         self.epsg = dgm_epsg
@@ -268,7 +268,7 @@ class MeshGrid:
                     max_r = r_steps[rx+1]+1 #1px overlap; Guranteees that the tilesize is 2**n+1
                     
                     bounds_geo = px2geo(np.array([[min_r, min_c], 
-                                                [max_r, max_c]]), gt=dgm_gt)
+                                                  [max_r, max_c]]), gt=dgm_gt)
                     
                     min_x_geo = np.min(bounds_geo[:, 0])
                     max_y_geo = np.max(bounds_geo[:, 1])
@@ -284,7 +284,11 @@ class MeshGrid:
                     triangles = tile.triangles
                     
                     #vertices are col/row; we further use row/col; hence, np.fliplr
+                    #delatin appaers to interpret row=0 as bottom left corner; Hence, we need 
+                    #invert this that its actually numpy style
                     vertices = np.fliplr(vertices.reshape(-1, 2))
+                    vertices[:, 0] = tile_h-1-vertices[:, 0]
+                    
                     triangles = triangles.reshape(-1, 3)
                                     
                     vert_h = tile_arr[vertices[:, 0], vertices[:, 1]]                
@@ -303,11 +307,8 @@ class MeshGrid:
                     new_tris_vix = np.arange(len(valid_tris_vix))
                     
                     triangles = new_tris_vix[valid_tris_vix_inv].reshape(-1, 3)
-                    
-                    if self.method == "delatin":
-                        triangles = triangles[:, [2,1,0]]
-                    
                     vertices = vertices[valid_tris_vix, :]               
+                    
                     
                     mesh_tile = MeshTile(vertices=vertices, 
                                         triangles=triangles, 
@@ -321,7 +322,6 @@ class MeshGrid:
 
                     progress.update(task_id=task, advance=1)
 
-                    
     def update_tid(self, tid, new_verts, new_tris, pop_tris):
                     
         self.data[tid].vertices = np.vstack((self.data[tid].vertices, np.array(new_verts)))
