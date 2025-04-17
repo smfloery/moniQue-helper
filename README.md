@@ -38,3 +38,28 @@ In many cases you want to add an orthophoto as texture onto the mesh. Accordingl
 python PATH/TO/main.py add-ortho OP_PATH JSON_PATH
 ```
 ``OP_PATH`` is the path to the orthophoto. AS for the DTM, all GDAL supported raster formates are supported. ``JSON_PATH`` is the path to the .json file created with ``create-mesh``. Per default, the resulting tiles will have a resolution of 1 meter. This can be changed with the optional ``--op-res`` argument. The output of this tool will be in the same directory as the mesh tiles within a new directory called ``op``. We tested moniQue with an OP of 1 meter. Below that, depending on the extent of the DTM, performance might drop.
+
+### Render scene from JSON (render-json)
+moniQue offerts the functionality to store the current 3D camera view as .json. This .json can be used to render the visible scene as RGB image as well as with the xyz-coordinates of the scene. 
+```shell
+python PATH/TO/main.py render-json CAMERA_JSON TILES_JSON OUT_DIR
+```
+``CAMERA_JSON`` is the path to the .json file created with monique and contains the camera parameters. ``TILES_JSON`` is the path to the .json file created with ``create-mesh`` and contains information on the mesh as well as orthophoto tiles. ``OUT_DIR`` is the directory where the results shall be stored. By default also an additional images containing the xyz-coordinates of the scene will be created. To avoid this the optional argument ``--no-xyz`` can be passed. The ``CAMERA_JSON`` must have the following format
+
+```json
+{
+    "NAME": {
+        "project": "path/to/gpkg",
+        "X0": 4530483.3,
+        "Y0": 2666130.4,
+        "Z0": 2436.0,
+        "alpha": 0.0,
+        "zeta": 1.656633,
+        "kappa": 1.56895,
+        "fov": 0.763068,
+        "img_w": 1682,
+        "img_h": 1070
+    }
+}
+```
+``X0``, ``Y0`` and ``Z0`` are the coordinates of the projection center in the same coordinates system as the mesh. ``alpha``, ``zeta`` and ``kappa``define the rotation of the camera. ``fov`` is the field of view of the camera. ``img_w`` and ``img_h`` are the dimensions of the output image. 
