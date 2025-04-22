@@ -5,7 +5,7 @@ On Windows, installing via Conda is strongly recommended:
 ```
 conda create -n venv_name
 conda activate venv_name
-conda install -c conda-forge pydelatin gdal typer pip
+conda install -c conda-forge pydelatin gdal typer pillow pyproj pip pandas
 pip install open3d
 ```
 While all packages are installed using conda we need to use pip for open3d as open3d does not maintain a recent version on conda. Now you can clone this repository to your local machine
@@ -63,3 +63,13 @@ python PATH/TO/main.py render-json CAMERA_JSON TILES_JSON OUT_DIR
 }
 ```
 ``X0``, ``Y0`` and ``Z0`` are the coordinates of the projection center in the same coordinates system as the mesh. ``alpha``, ``zeta`` and ``kappa``define the rotation of the camera. ``fov`` is the field of view of the camera. ``img_w`` and ``img_h`` are the dimensions of the output image. 
+
+### Render scene (with oriented image) from GKPG (render-gkpg)
+Similar to the previous function (render-json) it is possible to render the 3D scene with and without the oriented image directly from the .gpkg used by monique. 
+
+```shell
+main.py render-gpkg [OPTIONS] GPKG_PATH OUT_DIR
+```
+
+If the path to the .gpkg is provided (``GPKG_PATH``) and a output directory specified (``OUT_DIR``), two images will be created: One image showing only the rendered 3D scene and a second image containing the orientied image. The padding around the historical image is defined with the ``--pading`` option and is in degrees. Accordingly, using 5 means that 2.5° are added equally around the historical image. The position of the historical image in the object space is defined with the ``--hist-dist`` option and referes to the distance of the image from the projection center in meter. If the additional rendering with the historical image shall not be created, the option ``--no-hist`` must be provided. If the output renderings shall have other image dimensions the respective with and heigth can be set with ``--width`` and ``--height``.
+

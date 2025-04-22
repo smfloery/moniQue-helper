@@ -1,18 +1,25 @@
 import typer
+from typing import List, Optional
 from typing_extensions import Annotated
 from rich.progress import track
 import os
 from enum import Enum
 from monique_helper.terramesh import MeshGrid
-from monique_helper.io import load_tile_json, load_terrain, save_tif, save_png
-from monique_helper.transforms import alzeka2rot, R_ori2cv
-from osgeo import gdal, osr
+from monique_helper.io import load_tile_json, load_terrain, save_tif, save_png, load_gtif
+from monique_helper.transforms import alzeka2rot, R_ori2cv, alpha2azi
+from monique_helper.geom import plane_from_camera, img2square
+from osgeo import gdal, osr, ogr
 import json
 import string
 import numpy as np
 import pygfx as gfx
-from wgpu.gui.offscreen import WgpuCanvas
+from wgpu.gui.offscreen import WgpuCanvas as OffscreenCanvas
 import open3d as o3d
+from pyproj import Transformer
+from PIL import Image
+import base64
+from io import BytesIO
+import pandas as pd
 
 class MeshSimplification(str, Enum):
     delatin = "delatin"
@@ -132,7 +139,7 @@ def render_json(camera_json:Annotated[str, typer.Argument(help="Path to the *.js
         cam_w = data["img_w"]
         cam_h = data["img_h"]
         
-        offscreen_canvas = WgpuCanvas(size=(cam_w, cam_h), pixel_ratio=1)
+        offscreen_canvas = OffscreenCanvas(size=(cam_w, cam_h), pixel_ratio=1)
         offscreen_renderer = gfx.WgpuRenderer(offscreen_canvas, pixel_ratio=1)            
         
         euler = np.array([data["alpha"], data["zeta"], data["kappa"]])
@@ -193,6 +200,189 @@ def render_json(camera_json:Annotated[str, typer.Argument(help="Path to the *.js
             
             coord_arr = np.reshape(ans_coord, (cam_h, cam_w, 3))
             save_tif(coord_arr, os.path.join(out_dir, name + "_xyz.tif"))
+
+@app.command()            
+def render_gpkg(gpkg_path:Annotated[str, typer.Argument(help="Path to the *.gpkg containing the oriented cameras.")],
+                out_dir: Annotated[str, typer.Argument(help="Path to the directory where the outputs shall be stored.")],
+                padding:Annotated[float, typer.Option(help="Padding around historical image extent.")] = 5,
+                cam: Annotated[Optional[List[str]], typer.Option(help="Name of the cameras to create output for.")] = None,
+                w_hist:Annotated[bool, typer.Option(help="Create additional rendering with the historical image.")] = True,
+                hist_dist: Annotated[float, typer.Option(help="Distance of the historical image from the camera.")] = 10,
+                width: Annotated[int, typer.Option(help="Width in px of the output rendering. If None the width of the oriented image will be used.")] = None,
+                height: Annotated[int, typer.Option(help="Height in px of the output rendering. If None the width of the oriented image will be used.")] = None,
+                export_json: Annotated[bool, typer.Option(help="", hidden=True)] = False):
+       
+    if os.path.exists(gpkg_path):
+        ds = ogr.Open(gpkg_path)
+        gpkg_name = os.path.basename(gpkg_path).split(".")[0]
+    else:
+        raise typer.Exit("%s does not exists." % (gpkg_path))
+    
+    # If the file handle is null then exit
+    if ds is None:
+        raise typer.Exit("Failed to load %s." % (gpkg_path))
+        
+    # Select the dataset to retrieve from the GeoPackage and assign it to an layer instance called lyr.
+    # The names of available datasets can be found in the gpkg_contents table.
+    reg_lyr = ds.GetLayer("region")
+    cam_lyr = ds.GetLayer("cameras")
+    
+    # Refresh the reader
+    reg_lyr.ResetReading()
+    cam_lyr.ResetReading()
+    
+    # for each feature in the layer, print the feature properties
+    reg_feat = reg_lyr.GetNextFeature()
+    reg_dict = reg_feat.items()
+    
+    cam_dict = {}
+    for feat in cam_lyr:
+        feat_dict = feat.items()
+        if feat_dict["is_oriented"] == 1:
+            cam_dict[feat_dict["iid"]] = feat_dict
+    
+    tiles_json = reg_dict["json_path"]
+    
+    gfx_scene = gfx.Scene()
+    bg = gfx.Background(None, gfx.BackgroundMaterial([1, 1, 1, 1]))
+    gfx_scene.add(bg)
+    
+    print("Loading terrain...")
+    tiles_data = load_tile_json(tiles_json)
+    gfx_terrain, _ = load_terrain(tiles_data)
+    gfx_scene.add(gfx_terrain)
+    
+    if export_json:
+        print("EPSG:%s" % (tiles_data["epsg"]))
+        trans = Transformer.from_crs(int(tiles_data["epsg"]), 4326)
+        csv_spot_data = []
+        csv_render_data = []
+        canvas_h = 500
+        canvas_w = 500
+    
+    for cid, data in cam_dict.items():
+        
+        if cam is not None:
+            if cid not in cam:
+                continue
+             
+        print("...rendering %s." % (cid))
+        prc = np.array([data["obj_x0"], data["obj_y0"], data["obj_z0"]]) 
+        prc_local = prc - np.array(tiles_data["min_xyz"])
+        
+        if export_json:
+            prc_4326 = trans.transform(data["obj_x0"], data["obj_y0"])
+        
+        euler = np.array([data["alpha"], data["zeta"], data["kappa"]])
+        rmat = alzeka2rot(euler)
+        ior = np.array([data["img_x0"], data["img_y0"], data["f"]])
+        
+        img_path = data["path"]
+        img_arr, _, _ = load_gtif(img_path)
+        
+        if export_json:
+            bg_color = (255, 255, 255)
+            img = Image.fromarray(img_arr)
+            img.thumbnail((canvas_h, canvas_w))
+            img_pad = img2square(img, background_color=bg_color)
+            img_pad.save(os.path.join(out_dir, "%s_square.png" % (cid)))
+                    
+            img_pad_bits = BytesIO()
+            img_pad.save(img_pad_bits, format="png")
+            img_pad_str = "data:image/png;base64," + base64.b64encode(img_pad_bits.getvalue()).decode("utf-8")
+
+            img_w, img_h = img.size
+                    
+            if img_w > img_h:
+                diff = img_w-img_h
+                bbox = [diff/2., 0, img_w-(diff/2.), img_h]
+            else:
+                diff = img_h-img_w
+                bbox = [0, diff/2., img_w, img_h-(diff/2.)]
+
+            thumb_img = img.resize((50, 50), box=bbox)
+            thumb_bits = BytesIO()
+            thumb_img.save(thumb_bits, format="png")
+            thumb_str = "data:image/png;base64," + base64.b64encode(thumb_bits.getvalue()).decode("utf-8")
+        
+        hfov = data["hfov"]
+        vfov = data["vfov"]
+        
+        img_h = data["img_h"]
+        img_w = data["img_w"]
+        
+        canvas_h = img_h if width is None else width
+        canvas_w = img_w if height is None else height
+        
+        offscreen_canvas = OffscreenCanvas(size=(canvas_w, canvas_h), pixel_ratio=1)
+        offscreen_renderer = gfx.WgpuRenderer(offscreen_canvas) 
+        
+        rmat_gfx = np.zeros((4,4))
+        rmat_gfx[3, 3] = 1
+        rmat_gfx[:3, :3] = rmat
+                
+        if hfov > vfov:
+            gfx_camera = gfx.PerspectiveCamera(fov=np.rad2deg(hfov)+padding, depth_range=(1, 100000))
+        else:
+            gfx_camera = gfx.PerspectiveCamera(fov=np.rad2deg(vfov)+padding, depth_range=(1, 100000))
             
+        gfx_camera.local.position = prc_local
+        gfx_camera.local.rotation_matrix = rmat_gfx
+        
+        offscreen_canvas.request_draw(offscreen_renderer.render(gfx_scene, gfx_camera))
+        img_scene_arr = np.asarray(offscreen_canvas.draw())[:,:,:3]
+        save_png(img_scene_arr, os.path.join(out_dir, cid + ".png"))
+        
+        if export_json:
+            img_scene = Image.fromarray(img_scene_arr)
+            # img_scene.save(os.path.join(out_dir, "%s_wo.png" % (cid)))
+            img_scene_bits = BytesIO()
+            img_scene.save(img_scene_bits, format="png")
+            img_scene_str = "data:image/png;base64," + base64.b64encode(img_scene_bits.getvalue()).decode("utf-8")
+        
+        if w_hist and padding > 0:
+            plane_mesh = plane_from_camera(data, img_arr, dist_plane=hist_dist, min_xyz=np.array(tiles_data["min_xyz"]))
+            gfx_scene.add(plane_mesh)
+
+            offscreen_canvas.request_draw(offscreen_renderer.render(gfx_scene, gfx_camera))
+            img_scene_with_arr = np.asarray(offscreen_canvas.draw())[:,:,:3]
+            save_png(img_scene_with_arr, os.path.join(out_dir, cid + "_hist.png"))
+            gfx_scene.remove(plane_mesh)
+            
+            img_scene_with = Image.fromarray(img_scene_with_arr)           
+            img_scene_with_bits = BytesIO()
+            img_scene_with.save(img_scene_with_bits, format="png")
+            img_scene_with_str = "data:image/png;base64," + base64.b64encode(img_scene_with_bits.getvalue()).decode("utf-8")
+            
+            if export_json:
+                csv_render_data.append({"iid": "H" + cid,
+                                        "render":img_scene_str, 
+                                        "render_with":img_scene_with_str,
+                                        })
+                
+                csv_spot_data.append({"iid":"H" + cid,
+                                "image":img_pad_str,
+                                "thumb":thumb_str,
+                                "geom": "SRID=4326;POINT (%.6f %.6f)" % (prc_4326[1], prc_4326[0]),
+                                "altitude": prc[2],
+                                "hfov":hfov,
+                                "vfov":vfov,
+                                "alpha":euler[0],
+                                "heading":alpha2azi(euler[0])+np.pi,   #alpha appaers to be facing opposite direction; Hence, we need to add 180°
+                                "zeta":euler[1],
+                                "kappa":euler[2],
+                                "f":ior[2],                         
+                                "archive":data["archiv"] if "archiv" in list(data.keys()) else None,
+                                "copy": data["copy"] if "copy" in list(data.keys()) else None,
+                                "von":"%s-01-01" % (data["jahr"]) if "jahr" in list(data.keys()) else None,
+                                "bis":"%s-12-31" % (data["jahr"]) if "jahr" in list(data.keys()) else None})
+    
+    if export_json:
+        pd_spot = pd.DataFrame(csv_spot_data)
+        pd_spot.to_json(os.path.join(out_dir, "%s_spot.json" % (gpkg_name)), orient="records", indent=4)
+        
+        pd_render = pd.DataFrame(csv_render_data)
+        pd_render.to_json(os.path.join(out_dir, "%s_render.json" % (gpkg_name)), orient="records", indent=4)
+    
 if __name__ == "__main__":
     app()

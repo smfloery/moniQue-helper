@@ -23,3 +23,6 @@ def alzeka2rot(euler):
 def R_ori2cv(R):
     rx_200 = np.diag((1, -1, -1))
     return rx_200 @ np.transpose(R)
+
+def alpha2azi(alpha):
+    return np.deg2rad((450 - np.rad2deg(alpha)) % 360)
