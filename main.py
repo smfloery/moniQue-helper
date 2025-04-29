@@ -221,7 +221,10 @@ def render_gpkg(gpkg_path:Annotated[str, typer.Argument(help="Path to the *.gpkg
     # If the file handle is null then exit
     if ds is None:
         raise typer.Exit("Failed to load %s." % (gpkg_path))
-        
+    
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+     
     # Select the dataset to retrieve from the GeoPackage and assign it to an layer instance called lyr.
     # The names of available datasets can be found in the gpkg_contents table.
     reg_lyr = ds.GetLayer("region")
@@ -253,8 +256,7 @@ def render_gpkg(gpkg_path:Annotated[str, typer.Argument(help="Path to the *.gpkg
     gfx_scene.add(gfx_terrain)
     
     if export_json:
-        print("EPSG:%s" % (tiles_data["epsg"]))
-        trans = Transformer.from_crs(int(tiles_data["epsg"]), 4326)
+        trans = Transformer.from_crs(int(tiles_data["epsg"]), 4326, always_xy=True)
         csv_spot_data = []
         csv_render_data = []
         canvas_h = 500
@@ -363,7 +365,7 @@ def render_gpkg(gpkg_path:Annotated[str, typer.Argument(help="Path to the *.gpkg
                 csv_spot_data.append({"iid":"H" + cid,
                                 "image":img_pad_str,
                                 "thumb":thumb_str,
-                                "geom": "SRID=4326;POINT (%.6f %.6f)" % (prc_4326[1], prc_4326[0]),
+                                "geom": "SRID=4326;POINT (%.6f %.6f)" % (prc_4326[0], prc_4326[1]),
                                 "altitude": prc[2],
                                 "hfov":hfov,
                                 "vfov":vfov,
@@ -374,8 +376,8 @@ def render_gpkg(gpkg_path:Annotated[str, typer.Argument(help="Path to the *.gpkg
                                 "f":ior[2],                         
                                 "archive":data["archiv"] if "archiv" in list(data.keys()) else None,
                                 "copy": data["copy"] if "copy" in list(data.keys()) else None,
-                                "von":"%s-01-01" % (data["jahr"]) if "jahr" in list(data.keys()) else None,
-                                "bis":"%s-12-31" % (data["jahr"]) if "jahr" in list(data.keys()) else None})
+                                "von":"%s-01-01" % (data["jahr"]) if "jahr" in list(data.keys()) else "1111-01-01",
+                                "bis":"%s-12-31" % (data["jahr"]) if "jahr" in list(data.keys()) else "1111-12-31"})
     
     if export_json:
         pd_spot = pd.DataFrame(csv_spot_data)
