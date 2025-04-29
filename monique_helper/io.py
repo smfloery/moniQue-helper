@@ -4,6 +4,7 @@ import numpy as np
 import open3d as o3d
 import pygfx as gfx
 from osgeo import gdal, osr
+import glob
 
 def load_tile_json(json_path):
     
@@ -117,14 +118,19 @@ def load_terrain(tiles_data):
                                             tid=[int(tile["tid_int"])])
         
 
-        op_path = os.path.join(tiles_data["op_dir"], "%s.jpg" % (tile["tid"]))
-        img_arr, _ , _ = load_gtif(op_path)   
-        # img_arr = np.transpose(src.read(), (1,2,0))                        
-        img_arr = np.flipud(img_arr)
+        # op_path = os.path.join(tiles_data["op_dir"], "%s.jpg" % (tile["tid"]))
+        op_paths = glob.glob(os.path.normpath(os.path.join(tiles_data["op_dir"], "%s.*" % (tile["tid"]))))
         
-        tex = gfx.Texture(img_arr, dim=2)
-        mesh_material = gfx.MeshBasicMaterial(map=tex, side="FRONT")
-        
+        if len(op_paths) == 1:
+            op_path = op_paths[0]            
+            img_arr, _ , _ = load_gtif(op_path)   
+            img_arr = np.flipud(img_arr)
+            
+            tex = gfx.Texture(img_arr, dim=2)
+            mesh_material = gfx.MeshBasicMaterial(map=tex, side="FRONT")
+        else:
+            mesh_material = gfx.MeshNormalMaterial(side="FRONT")
+            
         #add lowest resolution material to mesh at startup
         mesh = gfx.Mesh(mesh_geom, mesh_material, visible=True)
         terrain.add(mesh)
