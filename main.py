@@ -370,7 +370,7 @@ def render_gpkg(gpkg_path:Annotated[str, typer.Argument(help="Path to the *.gpkg
                                 "hfov":hfov,
                                 "vfov":vfov,
                                 "alpha":euler[0],
-                                "heading":alpha2azi(euler[0])+np.pi,   #alpha appaers to be facing opposite direction; Hence, we need to add 180°
+                                "heading":alpha2azi(euler[0])
                                 "zeta":euler[1],
                                 "kappa":euler[2],
                                 "f":ior[2],                         
