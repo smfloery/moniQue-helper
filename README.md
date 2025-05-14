@@ -5,7 +5,7 @@ On Windows, installing via Conda is strongly recommended:
 ```
 conda create -n venv_name
 conda activate venv_name
-conda install -c conda-forge pydelatin gdal typer pillow pyproj pip pandas
+conda install -c conda-forge pydelatin gdal typer pillow pyproj pip pandas imageio
 pip install open3d
 ```
 While all packages are installed using conda we need to use pip for open3d as open3d does not maintain a recent version on conda. Now you can clone this repository to your local machine
@@ -73,3 +73,8 @@ main.py render-gpkg [OPTIONS] GPKG_PATH OUT_DIR
 
 If the path to the .gpkg is provided (``GPKG_PATH``) and a output directory specified (``OUT_DIR``), two images will be created: One image showing only the rendered 3D scene and a second image containing the orientied image. The padding around the historical image is defined with the ``--pading`` option and is in degrees. Accordingly, using 5 means that 2.5° are added equally around the historical image. The position of the historical image in the object space is defined with the ``--hist-dist`` option and referes to the distance of the image from the projection center in meter. If the additional rendering with the historical image shall not be created, the option ``--no-hist`` must be provided. If the output renderings shall have other image dimensions the respective with and heigth can be set with ``--width`` and ``--height``.
 
+### Render animated scene from GKPG (animate-gkpg)
+```shell
+main.py animate-gpkg [OPTIONS] GPKG_PATH GIF_DIR 
+```
+With this function a GIF animation of a selected historical image can be directly generated from the .gpkg. The main difference to the previous function is that in this case the ``--dist-range`` option which specifies the position of the historical image in each frame. ``--dist-range start stop step``. This will create an animation where the historical image in the first frame is ``start`` meters aways from the camera. This distance is increased in each frame by the ``step`` value until it reaches ``stop``. These frames are afterwards reversed that in the end the historical image is again at ``start`` meters. 

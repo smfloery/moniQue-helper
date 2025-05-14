@@ -1,7 +1,7 @@
 import typer
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from typing_extensions import Annotated
-from rich.progress import track
+from rich.progress import track, Progress
 import os
 from enum import Enum
 from monique_helper.terramesh import MeshGrid
@@ -20,6 +20,7 @@ from PIL import Image
 import base64
 from io import BytesIO
 import pandas as pd
+import imageio.v3 as iio
 
 class MeshSimplification(str, Enum):
     delatin = "delatin"
@@ -70,7 +71,7 @@ def create_mesh(dtm_path:Annotated[str, typer.Argument()],
 @app.command()
 def add_ortho(op_path:Annotated[str, typer.Argument(help="Parth to the original orthophoto.")],
               json_path:Annotated[str, typer.Argument(help="Path to the *.json created by create-mesh.")],
-              op_res:Annotated[int, typer.Option(help="Output resolution of the orthophoto tiles.")] = 1
+              op_res:Annotated[float, typer.Option(help="Output resolution of the orthophoto tiles.")] = 1
               ):
     
     print("Starting to create orthophoto tiles:")
@@ -204,7 +205,7 @@ def render_json(camera_json:Annotated[str, typer.Argument(help="Path to the *.js
 @app.command()            
 def render_gpkg(gpkg_path:Annotated[str, typer.Argument(help="Path to the *.gpkg containing the oriented cameras.")],
                 out_dir: Annotated[str, typer.Argument(help="Path to the directory where the outputs shall be stored.")],
-                padding:Annotated[float, typer.Option(help="Padding around historical image extent.")] = 5,
+                padding:Annotated[float, typer.Option(help="Padding around historical image extent.")] = 1,
                 cam: Annotated[Optional[List[str]], typer.Option(help="Name of the cameras to create output for.")] = None,
                 w_hist:Annotated[bool, typer.Option(help="Create additional rendering with the historical image.")] = True,
                 hist_dist: Annotated[float, typer.Option(help="Distance of the historical image from the camera.")] = 10,
@@ -370,7 +371,7 @@ def render_gpkg(gpkg_path:Annotated[str, typer.Argument(help="Path to the *.gpkg
                                 "hfov":hfov,
                                 "vfov":vfov,
                                 "alpha":euler[0],
-                                "heading":alpha2azi(euler[0])
+                                "heading":alpha2azi(euler[0]),
                                 "zeta":euler[1],
                                 "kappa":euler[2],
                                 "f":ior[2],                         
@@ -385,6 +386,129 @@ def render_gpkg(gpkg_path:Annotated[str, typer.Argument(help="Path to the *.gpkg
         
         pd_render = pd.DataFrame(csv_render_data)
         pd_render.to_json(os.path.join(out_dir, "%s_render.json" % (gpkg_name)), orient="records", indent=4)
+
+@app.command()            
+def animate_gpkg(gpkg_path:Annotated[str, typer.Argument(help="Path to the *.gpkg containing the oriented cameras.")],
+                out_dir: Annotated[str, typer.Argument(help="Path to save the .gif file. Must include the exeension.")],
+                padding:Annotated[float, typer.Option(help="Padding around historical image extent.")] = 1,
+                cam: Annotated[Optional[List[str]], typer.Option(help="Name of the cameras to create output for.")] = None,
+                dist_range: Annotated[Tuple[int, int, int], typer.Option(help="Distance of the historical image from the camera.")] = (100, 10000, 100),
+                width: Annotated[int, typer.Option(help="Width in px of the output rendering. If None the width of the oriented image will be used.")] = 1080,
+                height: Annotated[int, typer.Option(help="Height in px of the output rendering. If None the width of the oriented image will be used.")] = 1080):
+       
+    if os.path.exists(gpkg_path):
+        ds = ogr.Open(gpkg_path)
+        gpkg_name = os.path.basename(gpkg_path).split(".")[0]
+    else:
+        raise typer.Exit("%s does not exists." % (gpkg_path))
+    
+    # If the file handle is null then exit
+    if ds is None:
+        raise typer.Exit("Failed to load %s." % (gpkg_path))
+    
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+     
+    # Select the dataset to retrieve from the GeoPackage and assign it to an layer instance called lyr.
+    # The names of available datasets can be found in the gpkg_contents table.
+    reg_lyr = ds.GetLayer("region")
+    cam_lyr = ds.GetLayer("cameras")
+    
+    # Refresh the reader
+    reg_lyr.ResetReading()
+    cam_lyr.ResetReading()
+    
+    # for each feature in the layer, print the feature properties
+    reg_feat = reg_lyr.GetNextFeature()
+    reg_dict = reg_feat.items()
+    
+    cam_dict = {}
+    for feat in cam_lyr:
+        feat_dict = feat.items()
+        if feat_dict["is_oriented"] == 1:
+            cam_dict[feat_dict["iid"]] = feat_dict
+    
+    tiles_json = reg_dict["json_path"]
+    
+    gfx_scene = gfx.Scene()
+    bg = gfx.Background(None, gfx.BackgroundMaterial([1, 1, 1, 1]))
+    gfx_scene.add(bg)
+    
+    print("Loading terrain...")
+    tiles_data = load_tile_json(tiles_json)
+    gfx_terrain, _ = load_terrain(tiles_data)
+    gfx_scene.add(gfx_terrain)
+        
+    for cid, data in cam_dict.items():
+        
+        if cam is not None:
+            if cid not in cam:
+                continue
+        
+        gif_path = os.path.join(out_dir, f"{cid}.gif")
+        
+        print("...rendering %s." % (cid))
+        prc = np.array([data["obj_x0"], data["obj_y0"], data["obj_z0"]]) 
+        prc_local = prc - np.array(tiles_data["min_xyz"])
+        
+        euler = np.array([data["alpha"], data["zeta"], data["kappa"]])
+        rmat = alzeka2rot(euler)
+        ior = np.array([data["img_x0"], data["img_y0"], data["f"]])
+        
+        img_path = data["path"]
+        img_arr, _, _ = load_gtif(img_path)
+                
+        hfov = data["hfov"]
+        vfov = data["vfov"]
+        
+        # img_h = data["img_h"]
+        # img_w = data["img_w"]
+        
+        canvas_h = width
+        canvas_w = height
+        
+        offscreen_canvas = OffscreenCanvas(size=(canvas_w, canvas_h), pixel_ratio=1)
+        offscreen_renderer = gfx.WgpuRenderer(offscreen_canvas) 
+        
+        rmat_gfx = np.zeros((4,4))
+        rmat_gfx[3, 3] = 1
+        rmat_gfx[:3, :3] = rmat
+                
+        if hfov > vfov:
+            gfx_camera = gfx.PerspectiveCamera(fov=np.rad2deg(hfov)+padding, depth_range=(1, 100000))
+        else:
+            gfx_camera = gfx.PerspectiveCamera(fov=np.rad2deg(vfov)+padding, depth_range=(1, 100000))
+            
+        gfx_camera.local.position = prc_local
+        gfx_camera.local.rotation_matrix = rmat_gfx
+        
+        dist_range = np.arange(dist_range[0], dist_range[1]+dist_range[2], dist_range[2])
+       
+        frames = []
+        
+        with Progress() as progress:
+            
+            task1 = progress.add_task("...rendering frames.", total=len(dist_range))
+
+            for dx, dist in enumerate(dist_range):
+                plane_mesh = plane_from_camera(data, img_arr, dist_plane=dist, min_xyz=np.array(tiles_data["min_xyz"]))
+                gfx_scene.add(plane_mesh)
+
+                offscreen_canvas.request_draw(offscreen_renderer.render(gfx_scene, gfx_camera))
+                img_scene_with_arr = np.asarray(offscreen_canvas.draw())[:,:,:3]
+                frames.append(img_scene_with_arr)
+                gfx_scene.remove(plane_mesh)
+                
+                progress.update(task1, advance=1)
+        
+                
+        frames_reverse = frames[::-1]
+        frames_total = frames + frames_reverse
+        
+        print(f"...saving {gif_path}")
+        iio.imwrite(gif_path, frames_total, duration=50)
+            
+        
     
 if __name__ == "__main__":
     app()
