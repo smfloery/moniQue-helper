@@ -395,7 +395,16 @@ def animate_gpkg(gpkg_path:Annotated[str, typer.Argument(help="Path to the *.gpk
                 dist_range: Annotated[Tuple[int, int, int], typer.Option(help="Distance of the historical image from the camera.")] = (100, 10000, 100),
                 width: Annotated[int, typer.Option(help="Width in px of the output rendering. If None the width of the oriented image will be used.")] = 1080,
                 height: Annotated[int, typer.Option(help="Height in px of the output rendering. If None the width of the oriented image will be used.")] = 1080):
-       
+    
+    logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "monique_helper", "myalpics_logo_black_text_trans_200px.png")
+    logo_arr = np.array(Image.open(logo_path))
+    
+    logo_alpha = logo_arr[:, :, -1]
+    logo_alpha[logo_alpha > 0] = 255
+    logo_alpha = logo_alpha / 255.
+    
+    logo_h, logo_w, logo_d = np.shape(logo_arr)
+    
     if os.path.exists(gpkg_path):
         ds = ogr.Open(gpkg_path)
         gpkg_name = os.path.basename(gpkg_path).split(".")[0]
@@ -461,9 +470,6 @@ def animate_gpkg(gpkg_path:Annotated[str, typer.Argument(help="Path to the *.gpk
         hfov = data["hfov"]
         vfov = data["vfov"]
         
-        # img_h = data["img_h"]
-        # img_w = data["img_w"]
-        
         canvas_h = width
         canvas_w = height
         
@@ -496,6 +502,11 @@ def animate_gpkg(gpkg_path:Annotated[str, typer.Argument(help="Path to the *.gpk
 
                 offscreen_canvas.request_draw(offscreen_renderer.render(gfx_scene, gfx_camera))
                 img_scene_with_arr = np.asarray(offscreen_canvas.draw())[:,:,:3]
+                
+                img_scene_with_arr[-logo_h:, -logo_w:, 0] = (logo_arr[:, :, 0] * logo_alpha + img_scene_with_arr[-logo_h:, -logo_w:, 0] * (1 - logo_alpha)).astype(np.uint8)
+                img_scene_with_arr[-logo_h:, -logo_w:, 1] = (logo_arr[:, :, 1] * logo_alpha + img_scene_with_arr[-logo_h:, -logo_w:, 1] * (1 - logo_alpha)).astype(np.uint8)
+                img_scene_with_arr[-logo_h:, -logo_w:, 2] = (logo_arr[:, :, 2] * logo_alpha + img_scene_with_arr[-logo_h:, -logo_w:, 2] * (1 - logo_alpha)).astype(np.uint8)
+                
                 frames.append(img_scene_with_arr)
                 gfx_scene.remove(plane_mesh)
                 
@@ -507,7 +518,8 @@ def animate_gpkg(gpkg_path:Annotated[str, typer.Argument(help="Path to the *.gpk
         
         print(f"...saving {gif_path}")
         iio.imwrite(gif_path, frames_total, duration=50)
-            
+        
+        print("...done!")
         
     
 if __name__ == "__main__":
